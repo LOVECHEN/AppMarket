@@ -48,7 +48,8 @@ android {
 
     val properties = Properties()
     runCatching { project.rootProject.file("local.properties").reader(Charsets.UTF_8).use(properties::load) }
-    val keystorePath = properties.getProperty("KEYSTORE_PATH") ?: System.getenv("KEYSTORE_PATH")
+    val keystorePath = (properties.getProperty("KEYSTORE_PATH") ?: System.getenv("KEYSTORE_PATH"))
+        ?.takeIf { it.isNotBlank() && file(it).isFile }
     val keystorePwd = properties.getProperty("KEYSTORE_PASS") ?: System.getenv("KEYSTORE_PASS")
     val alias = properties.getProperty("KEY_ALIAS") ?: System.getenv("KEY_ALIAS")
     val pwd = properties.getProperty("KEY_PASSWORD") ?: System.getenv("KEY_PASSWORD")
