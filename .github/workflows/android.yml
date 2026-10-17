@@ -11,11 +11,18 @@ on:
       - "doc/*"
       - ".github/workflows/android.yml"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
       SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+      KEYSTORE_PATH: ${{ github.workspace }}/keystore.jks
+      KEYSTORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
     steps:
       - name: Checkout Repository
@@ -32,26 +39,49 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Validate Signing Secrets
+        run: |
+          for name in SIGNING_KEY KEYSTORE_PASS KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required signing secret: $name"
+              exit 1
+            fi
+          done
+
       - name: Decode Signing Key
-        if: ${{ env.SIGNING_KEY != '' }}
         run: printf '%s' "$SIGNING_KEY" | base64 -d > keystore.jks
 
       - name: Build Release APK
         run: |
           ./gradlew :app:android:assembleRelease
           echo "APK_FILE=$(find app/android/build/outputs/apk/release -name '*.apk' | head -n 1)" >> $GITHUB_ENV
-        env:
-          KEYSTORE_PATH: ${{ github.workspace }}/keystore.jks
-          KEYSTORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload APK Artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ env.APK_FILE }}
-          archive: false
+      - name: Verify LOVE Signature
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          EXPECTED_SHA256="4a0dec98b20b25b885f694338d5a35b55dc8e179d40fe84afbfe98330001a218"
+          ACTUAL_SHA256=$("$APKSIGNER" verify --print-certs "$APK_FILE" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "::error::Unexpected APK signing certificate: $ACTUAL_SHA256"
+            exit 1
+          fi
+          echo "Verified LOVE signing certificate: $ACTUAL_SHA256"
+
+      - name: Publish Rolling Prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ci-latest
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$APK_FILE" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$APK_FILE" \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --title "Latest CI Build" \
+              --notes "Rolling prerelease built and signed by GitHub Actions."
+          fi
 
       - name: Display APK Hashes
         run: |
