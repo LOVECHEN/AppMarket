@@ -60,13 +60,14 @@ jobs:
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
           EXPECTED_SHA256="4a0dec98b20b25b885f694338d5a35b55dc8e179d40fe84afbfe98330001a218"
-          ACTUAL_SHA256=$("$APKSIGNER" verify --print-certs "$APK_FILE" \
-            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
-          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
-            echo "::error::Unexpected APK signing certificate: $ACTUAL_SHA256"
+          CERT_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs "$APK_FILE" 2>&1)
+          printf '%s\n' "$CERT_OUTPUT"
+          NORMALIZED_CERT_OUTPUT=$(printf '%s' "$CERT_OUTPUT" | tr '[:upper:]' '[:lower:]' | tr -d ':')
+          if [[ "$NORMALIZED_CERT_OUTPUT" != *"$EXPECTED_SHA256"* ]]; then
+            echo "::error::APK is not signed by the expected LOVE certificate"
             exit 1
           fi
-          echo "Verified LOVE signing certificate: $ACTUAL_SHA256"
+          echo "Verified LOVE signing certificate: $EXPECTED_SHA256"
 
       - name: Publish Rolling Prerelease
         env:
